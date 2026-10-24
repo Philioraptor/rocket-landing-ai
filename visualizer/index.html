@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Starhopper-RL: Autonomous 6-DOF Falcon 9 Recovery & Landing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background-color: #020617;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "SF Mono", monospace;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* SpaceX Cyber-Glass HUD */
+        .hud-panel {
+            position: absolute;
+            background: rgba(10, 15, 30, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            z-index: 10;
+        }
+
+        /* Header */
+        #header-hud {
+            top: 20px;
+            left: 20px;
+            min-width: 340px;
+        }
+        .title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .title {
+            font-size: 19px;
+            font-weight: 900;
+            letter-spacing: 2.5px;
+            color: #00f0ff;
+            text-transform: uppercase;
+            text-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
+        }
+        .badge {
+            background: rgba(0, 240, 255, 0.15);
+            border: 1px solid #00f0ff;
+            color: #00f0ff;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 4px;
+            letter-spacing: 1px;
+        }
+        .subtitle {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+
+        /* Telemetry Instrument Cluster */
+        #telemetry-hud {
+            top: 20px;
+            right: 20px;
+            width: 300px;
+        }
+        .telem-header {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #64748b;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .telem-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 7px;
+            font-size: 12px;
+        }
+        .telem-label {
+            color: #94a3b8;
+            letter-spacing: 0.5px;
+        }
+        .telem-val {
+            font-family: "SF Mono", monospace;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        .safe { color: #10b981; text-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+        .warn { color: #f59e0b; text-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
+        .danger { color: #ef4444; text-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 3px;
+            margin-bottom: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00f0ff, #10b981);
+            box-shadow: 0 0 8px #00f0ff;
+            transition: width 0.05s ease;
+        }
+
+        /* Gyro Artificial Horizon */
+        .gyro-box {
+            width: 100%;
+            height: 50px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.5);
+            margin: 8px 0 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .gyro-horizon {
+            width: 90%;
+            height: 2px;
+            background: #00f0ff;
+            box-shadow: 0 0 8px #00f0ff;
+            position: absolute;
+            transition: transform 0.04s ease;
+        }
+        .gyro-center {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f59e0b;
+            box-shadow: 0 0 8px #f59e0b;
+            z-index: 2;
+        }
+
+        /* Controls Panel */
+        #controls-hud {
+            bottom: 24px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 340px;
+        }
+        .btn-row {
+            display: flex;
+            gap: 8px;
+        }
+        .btn {
+            flex: 1;
+            background: linear-gradient(135deg, #00f0ff 0%, #0072ff 100%);
+            border: none;
+            color: #020617;
+            font-weight: 800;
+            font-size: 11px;
+            letter-spacing: 1px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            box-shadow: 0 4px 15px rgba(0, 240, 255, 0.3);
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 240, 255, 0.5);
+        }
+        .btn-secondary {
+            flex: 0.5;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #94a3b8;
+            box-shadow: none;
+        }
+        .btn-secondary:hover {
+            border-color: #00f0ff;
+            color: #00f0ff;
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+        }
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            color: #94a3b8;
+        }
+        .slider-val {
+            color: #00f0ff;
+            font-weight: 700;
+        }
+        input[type="range"] {
+            accent-color: #00f0ff;
+            cursor: pointer;
+        }
+
+        /* Preset Buttons */
+        .preset-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+        }
+        .btn-preset {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #cbd5e1;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 6px 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-transform: uppercase;
+        }
+        .btn-preset:hover {
+            border-color: #00f0ff;
+            color: #00f0ff;
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        /* Camera Switcher Buttons */
+        .cam-btn-group {
+            display: flex;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 3px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .cam-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 6px 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-transform: uppercase;
+        }
+        .cam-btn.active {
+            background: #00f0ff;
+            color: #020617;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Center Bottom Status Banner */
+        #status-hud {
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            pointer-events: none;
+        }
+        .status-pill {
+            font-size: 14px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            padding: 8px 24px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.8);
+        }
+        .status-descent {
+            background: rgba(0, 240, 255, 0.15);
+            border: 1px solid #00f0ff;
+            color: #00f0ff;
+            text-shadow: 0 0 10px #00f0ff;
+        }
+        .status-recover {
+            background: rgba(168, 85, 247, 0.25);
+            border: 1px solid #a855f7;
+            color: #d8b4fe;
+            text-shadow: 0 0 12px #a855f7;
+            animation: pulse 0.8s infinite alternate;
+        }
+        .status-burn {
+            background: rgba(245, 158, 11, 0.2);
+            border: 1px solid #f59e0b;
+            color: #f59e0b;
+            text-shadow: 0 0 10px #f59e0b;
+        }
+        .status-landed {
+            background: rgba(16, 185, 129, 0.25);
+            border: 1px solid #10b981;
+            color: #10b981;
+            text-shadow: 0 0 15px #10b981;
+        }
+        .status-crash {
+            background: rgba(239, 68, 68, 0.25);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            text-shadow: 0 0 15px #ef4444;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.7; transform: scale(0.98); }
+            100% { opacity: 1.0; transform: scale(1.03); }
+        }
+
+        /* Landing Scorecard / Debrief HUD */
+        #debrief-hud {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.95);
+            width: 380px;
+            text-align: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            border-width: 2px;
+            z-index: 100;
+        }
+        #debrief-hud.active {
+            opacity: 1;
+            pointer-events: all;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .debrief-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #94a3b8;
+            margin-bottom: 12px;
+        }
+        .debrief-close {
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            color: #64748b;
+        }
+        .debrief-close:hover { color: #ffffff; }
+        .debrief-grade {
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            margin: 4px 0;
+            text-transform: uppercase;
+        }
+        .debrief-subtitle {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-bottom: 16px;
+        }
+        .debrief-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            text-align: left;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .debrief-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .debrief-lbl {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #64748b;
+        }
+        .debrief-val {
+            font-family: "SF Mono", monospace;
+            font-size: 16px;
+            font-weight: 800;
+        }
+        .debrief-note {
+            font-size: 9px;
+            color: #94a3b8;
+        }
+
+        /* Grade Themes */
+        .grade-flawless {
+            border-color: #10b981 !important;
+            box-shadow: 0 0 35px rgba(16, 185, 129, 0.4) !important;
+        }
+        .grade-flawless .debrief-grade {
+            color: #10b981;
+            text-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+        }
+
+        .grade-excellent {
+            border-color: #00f0ff !important;
+            box-shadow: 0 0 35px rgba(0, 240, 255, 0.4) !important;
+        }
+        .grade-excellent .debrief-grade {
+            color: #00f0ff;
+            text-shadow: 0 0 16px rgba(0, 240, 255, 0.6);
+        }
+
+        .grade-nominal {
+            border-color: #f59e0b !important;
+            box-shadow: 0 0 35px rgba(245, 158, 11, 0.4) !important;
+        }
+        .grade-nominal .debrief-grade {
+            color: #f59e0b;
+            text-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+        }
+
+        .grade-crash {
+            border-color: #ef4444 !important;
+            box-shadow: 0 0 35px rgba(239, 68, 68, 0.4) !important;
+        }
+        .grade-crash .debrief-grade {
+            color: #ef4444;
+            text-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
+        }
+
+        /* Adaptation Debrief Box & Pill */
+        .debrief-adapt-box {
+            margin-top: 12px;
+            background: rgba(0, 240, 255, 0.08);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 8px;
+            padding: 10px;
+            text-align: left;
+            font-size: 11px;
+        }
+        .debrief-adapt-title {
+            font-weight: 800;
+            color: #00f0ff;
+            margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .debrief-adapt-desc {
+            color: #cbd5e1;
+            line-height: 1.4;
+        }
+        .btn-adapt {
+            background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%) !important;
+            color: #ffffff !important;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4) !important;
+        }
+        .btn-adapt:hover {
+            box-shadow: 0 6px 22px rgba(168, 85, 247, 0.6) !important;
+        }
+        .online-adapt-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            color: #94a3b8;
+            margin-top: 6px;
+            padding: 3px 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: fit-content;
+        }
+        .pulse-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 8px #10b981;
+            animation: pulse-green 1.5s infinite;
+        }
+        @keyframes pulse-green {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.8); }
+        }
+
+        /* Audio Indicator */
+        #sound-toggle {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+        #sound-toggle:hover { color: #00f0ff; }
+    </style>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <!-- Header HUD -->
+    <div id="header-hud" class="hud-panel">
+        <div class="title-row">
+            <div class="title">Falcon 9 Autonomous GNC</div>
+            <span class="badge">VLA / 6-DOF</span>
+        </div>
+        <div class="subtitle">Thrust Vector Control & Extreme Tumble Recovery</div>
+        <div class="online-adapt-pill">
+            <span class="pulse-dot"></span>
+            <span>Online Adaptive Meta-Learning: ACTIVE</span>
+            <span id="adapt-level" style="color: #00f0ff; margin-left: 4px;">v1.0</span>
+        </div>
+        <div id="sound-toggle">
+            <span id="sound-icon">🔇</span>
+            <span id="sound-text">Click to enable Rocket Engine Audio</span>
+        </div>
+    </div>
+
+    <!-- Live Telemetry HUD -->
+    <div id="telemetry-hud" class="hud-panel">
+        <div class="telem-header">
+            <span>Booster Telemetry</span>
+            <span id="flight-counter" style="color: #00f0ff;">Flight #1</span>
+        </div>
+        
+        <div class="telem-row">
+            <span class="telem-label">ALTITUDE</span>
+            <span class="telem-val" id="val-alt">300.0 m</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-fill" id="bar-alt" style="width: 100%;"></div>
+        </div>
+
+        <div class="telem-row">
+            <span class="telem-label">DESCENT VELOCITY</span>
+            <span class="telem-val" id="val-vy">-20.0 m/s</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">HORIZONTAL VELOCITY</span>
+            <span class="telem-val" id="val-vx">0.0 m/s</span>
+        </div>
+
+        <div class="gyro-box">
+            <div class="gyro-horizon" id="gyro-line"></div>
+            <div class="gyro-center"></div>
+        </div>
+
+        <div class="telem-row">
+            <span class="telem-label">PITCH TILT</span>
+            <span class="telem-val" id="val-tilt">0.0°</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">SPIN RATE (ω)</span>
+            <span class="telem-val" id="val-omega">0.0°/s</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">MERLIN TVC GIMBAL</span>
+            <span class="telem-val" id="val-gimbal">0.0°</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">THROTTLE (1D)</span>
+            <span class="telem-val" id="val-throttle">0%</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">RCS THRUSTERS</span>
+            <span class="telem-val safe" id="val-rcs">ACTIVE</span>
+        </div>
+        <div class="telem-row">
+            <span class="telem-label">PROPELLANT</span>
+            <span class="telem-val" id="val-fuel">100%</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-fill" id="bar-fuel" style="width: 100%;"></div>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div id="controls-hud" class="hud-panel">
+        <div class="btn-row">
+            <button class="btn" id="btn-launch">🚀 Launch Flight</button>
+            <button class="btn btn-secondary" id="btn-zero">Reset (0°)</button>
+        </div>
+
+        <!-- Initial Tilt Angle Slider -->
+        <div class="slider-group">
+            <div class="slider-header">
+                <span>Initial Launch Tilt Angle:</span>
+                <span class="slider-val" id="tilt-label">0°</span>
+            </div>
+            <input type="range" id="slider-tilt" min="-60" max="60" value="0">
+        </div>
+
+        <!-- Initial Tumble Spin Slider -->
+        <div class="slider-group">
+            <div class="slider-header">
+                <span>Initial Spin / Tumble Rate:</span>
+                <span class="slider-val" id="spin-label">0.0°/s</span>
+            </div>
+            <input type="range" id="slider-spin" min="-30" max="30" value="0">
+        </div>
+
+        <!-- Wind Slider -->
+        <div class="slider-group">
+            <div class="slider-header">
+                <span>Crosswind Gust:</span>
+                <span class="slider-val" id="wind-label">0 km/h</span>
+            </div>
+            <input type="range" id="slider-wind" min="-50" max="50" value="0">
+        </div>
+
+        <div>
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 5px;">CAMERA VIEW:</div>
+            <div class="cam-btn-group">
+                <button class="cam-btn active" id="cam-follow">Follow</button>
+                <button class="cam-btn" id="cam-deck">Drone Ship</button>
+                <button class="cam-btn" id="cam-orbit">Orbit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Center Bottom Status Banner -->
+    <div id="status-hud">
+        <div class="status-pill status-descent" id="status-pill">FREEFALL DESCENT</div>
+    </div>
+
+    <!-- Touchdown Scorecard / Debrief Modal -->
+    <div id="debrief-hud" class="hud-panel">
+        <div class="debrief-header">
+            <span>MISSION DEBRIEF</span>
+            <span class="debrief-close" id="debrief-close">×</span>
+        </div>
+        <div class="debrief-grade" id="debrief-grade">A+ FLAWLESS</div>
+        <div class="debrief-subtitle" id="debrief-sub">Pristine Autonomous Falcon 9 Touchdown</div>
+        
+        <div class="debrief-grid">
+            <div class="debrief-item">
+                <span class="debrief-lbl">TOUCHDOWN SPEED</span>
+                <span class="debrief-val safe" id="db-vy">1.38 m/s</span>
+                <span class="debrief-note">Target: &lt; 2.0 m/s [FEATHER]</span>
+            </div>
+            <div class="debrief-item">
+                <span class="debrief-lbl">PAD RADIAL ERROR</span>
+                <span class="debrief-val safe" id="db-dist">0.82 m</span>
+                <span class="debrief-note">Target: &lt; 5.0 m [BULLSEYE]</span>
+            </div>
+            <div class="debrief-item">
+                <span class="debrief-lbl">VERTICAL ATTITUDE</span>
+                <span class="debrief-val safe" id="db-tilt">0.6°</span>
+                <span class="debrief-note">Target: &lt; 3.0° [ALIGNED]</span>
+            </div>
+            <div class="debrief-item">
+                <span class="debrief-lbl">PROPELLANT RESERVE</span>
+                <span class="debrief-val safe" id="db-fuel">24%</span>
+                <span class="debrief-note">Remaining Margin</span>
+            </div>
+        </div>
+
+        <div id="db-adapt-box" class="debrief-adapt-box">
+            <div class="debrief-adapt-title">🧠 Online Policy Adaptation:</div>
+            <div id="db-adapt-text" class="debrief-adapt-desc">Analyzing flight failure telemetry...</div>
+        </div>
+
+        <div class="btn-row" style="margin-top: 14px;">
+            <button class="btn" id="db-relaunch">🚀 Next Test</button>
+            <button class="btn btn-adapt" id="db-auto-adapt">🧠 Auto-Adapt & Re-Fly</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Procedural Web Audio Rocket Roar ---
+        let audioCtx = null, noiseGain = null, noiseFilter = null, soundEnabled = false;
+
+        function initAudio() {
+            if (audioCtx) return;
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+
+            const bufferSize = audioCtx.sampleRate * 2;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+            for (let i = 0; i < bufferSize; i++) {
+                const white = Math.random() * 2 - 1;
+                b0 = 0.99886 * b0 + white * 0.0555179;
+                b1 = 0.99332 * b1 + white * 0.0750759;
+                b2 = 0.96900 * b2 + white * 0.1538520;
+                b3 = 0.86650 * b3 + white * 0.3104856;
+                b4 = 0.55000 * b4 + white * 0.5329522;
+                b5 = -0.7616 * b5 - white * 0.0168980;
+                output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+                b6 = white * 0.115926;
+            }
+
+            const whiteNoise = audioCtx.createBufferSource();
+            whiteNoise.buffer = noiseBuffer;
+            whiteNoise.loop = true;
+
+            noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = 'lowpass';
+            noiseFilter.frequency.value = 180;
+
+            noiseGain = audioCtx.createGain();
+            noiseGain.gain.value = 0.0;
+
+            whiteNoise.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            noiseGain.connect(audioCtx.destination);
+            whiteNoise.start(0);
+
+            soundEnabled = true;
+            document.getElementById('sound-icon').innerText = '🔊';
+            document.getElementById('sound-text').innerText = 'Merlin 1D Audio Active';
+        }
+
+        window.addEventListener('click', () => {
+            if (!audioCtx) initAudio();
+            else if (audioCtx.state === 'suspended') audioCtx.resume();
+        });
+
+        // --- 2. High-End Three.js Graphics ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020617);
+        scene.fog = new THREE.FogExp2(0x020617, 0.0016);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.5, 3000);
+        camera.position.set(0, 90, 160);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.3;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.01;
+        controls.minDistance = 15;
+        controls.maxDistance = 600;
+
+        // Starfield
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 2000;
+        const starPos = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount * 3; i += 3) {
+            starPos[i] = (Math.random() - 0.5) * 2500;
+            starPos[i + 1] = 80 + Math.random() * 900;
+            starPos[i + 2] = (Math.random() - 0.5) * 2500;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, transparent: true, opacity: 0.85 })));
+
+        // Moon
+        const moon = new THREE.Mesh(new THREE.SphereGeometry(18, 32, 32), new THREE.MeshBasicMaterial({ color: 0xf1f5f9 }));
+        moon.position.set(400, 500, -700);
+        scene.add(moon);
+
+        // Lighting
+        scene.add(new THREE.HemisphereLight(0x1e293b, 0x020617, 0.8));
+        const moonLight = new THREE.DirectionalLight(0xa5b4fc, 1.4);
+        moonLight.position.set(250, 400, -350);
+        moonLight.castShadow = true;
+        scene.add(moonLight);
+
+        // Fiery Engine Point Light
+        const engineLight = new THREE.PointLight(0xff6600, 0, 120, 1.6);
+        scene.add(engineLight);
+
+        // --- 3. Ocean Surface ---
+        const ocean = new THREE.Mesh(
+            new THREE.PlaneGeometry(3500, 3500, 128, 128),
+            new THREE.MeshStandardMaterial({ color: 0x071529, roughness: 0.12, metalness: 0.88, flatShading: true })
+        );
+        ocean.rotation.x = -Math.PI / 2;
+        ocean.receiveShadow = true;
+        scene.add(ocean);
+
+        // --- 4. SpaceX Drone Ship (ASDS "A Shortfall of Gravitas") ---
+        const bargeGroup = new THREE.Group();
+        const hull = new THREE.Mesh(
+            new THREE.BoxGeometry(68, 4, 115),
+            new THREE.MeshStandardMaterial({ color: 0x1a1e24, roughness: 0.6, metalness: 0.4 })
+        );
+        hull.position.y = 2;
+        hull.castShadow = true;
+        hull.receiveShadow = true;
+        bargeGroup.add(hull);
+
+        // Perimeter yellow hazard line
+        const edgeLine = new THREE.Mesh(new THREE.BoxGeometry(65, 0.1, 112), new THREE.MeshBasicMaterial({ color: 0xfacc15 }));
+        edgeLine.position.y = 4.02;
+        bargeGroup.add(edgeLine);
+
+        // Steel deck
+        const deckPlate = new THREE.Mesh(new THREE.BoxGeometry(63, 0.1, 110), new THREE.MeshStandardMaterial({ color: 0x242831, roughness: 0.8 }));
+        deckPlate.position.y = 4.04;
+        deckPlate.receiveShadow = true;
+        bargeGroup.add(deckPlate);
+
+        // Target Rings ("X" bullseye)
+        const ringOuter = new THREE.Mesh(new THREE.RingGeometry(13, 14.5, 48), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+        ringOuter.rotation.x = -Math.PI / 2;
+        ringOuter.position.y = 4.10;
+        bargeGroup.add(ringOuter);
+
+        const ringInner = new THREE.Mesh(new THREE.RingGeometry(3.5, 4.8, 32), new THREE.MeshBasicMaterial({ color: 0x00f0ff, side: THREE.DoubleSide }));
+        ringInner.rotation.x = -Math.PI / 2;
+        ringInner.position.y = 4.10;
+        bargeGroup.add(ringInner);
+
+        scene.add(bargeGroup);
+
+        // --- 5. Ultra-Realistic Falcon 9 Booster 3D Model ---
+        const rocketGroup = new THREE.Group();
+
+        // 1. Slender Fuselage (Height: 14m, Radius: 1.2m - Authentic 1:12 proportion)
+        const whiteBodyMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25, metalness: 0.35 });
+        const blackCarbonMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.7, metalness: 0.3 });
+        const titaniumMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.2, metalness: 0.9 });
+
+        // Lower Liquid Oxygen / RP-1 Tank
+        const lowerBody = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 9.5, 32), whiteBodyMat);
+        lowerBody.position.y = 5.25;
+        lowerBody.castShadow = true;
+        rocketGroup.add(lowerBody);
+
+        // Black Interstage Section (Stage 1 / Stage 2 junction)
+        const interstage = new THREE.Mesh(new THREE.CylinderGeometry(1.205, 1.205, 3.2, 32), blackCarbonMat);
+        interstage.position.y = 11.6;
+        rocketGroup.add(interstage);
+
+        // Aerodynamic Payload Nosecone
+        const nose = new THREE.Mesh(new THREE.ConeGeometry(1.2, 3.2, 32), blackCarbonMat);
+        nose.position.y = 14.8;
+        rocketGroup.add(nose);
+
+        // Cable Raceway (Vertical conduit running down the side of Falcon 9)
+        const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.15, 12.0, 0.25), blackCarbonMat);
+        raceway.position.set(1.25, 7.0, 0);
+        rocketGroup.add(raceway);
+
+        // 2. Titanium Waffle Grid Fins (Authentic open lattice structure)
+        const gridFins = [];
+        for (let i = 0; i < 4; i++) {
+            const finAssembly = new THREE.Group();
+            const angle = (i * Math.PI) / 2;
+
+            // Main frame
+            const frame = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.08), titaniumMat);
+            finAssembly.add(frame);
+
+            // Cross-hatch internal lattice slats
+            for (let s = -0.4; s <= 0.4; s += 0.2) {
+                const slat = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.65, 0.1), titaniumMat);
+                slat.position.x = s;
+                finAssembly.add(slat);
+            }
+
+            finAssembly.position.set(Math.cos(angle) * 1.5, 12.8, Math.sin(angle) * 1.5);
+            finAssembly.rotation.y = angle;
+            rocketGroup.add(finAssembly);
+            gridFins.push(finAssembly);
+        }
+
+        // 3. Quad Falcon 9 Landing Legs (Dual-strut hydraulic A-frames)
+        const legAssemblies = [];
+        for (let i = 0; i < 4; i++) {
+            const leg = new THREE.Group();
+            const angle = (i * Math.PI) / 2 + Math.PI / 4;
+
+            // Main carbon-fiber deployable strut
+            const mainStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 5.5), blackCarbonMat);
+            mainStrut.position.set(0, 2.2, 0);
+            leg.add(mainStrut);
+
+            // Hydraulic telescoping cylinder
+            const cylinder = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2), titaniumMat);
+            cylinder.position.set(0.3, 1.5, 0);
+            cylinder.rotation.z = -0.2;
+            leg.add(cylinder);
+
+            // Footpad
+            const footpad = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.12, 16), blackCarbonMat);
+            footpad.position.set(0, -0.4, 0);
+            leg.add(footpad);
+
+            leg.position.set(Math.cos(angle) * 1.35, 0.4, Math.sin(angle) * 1.35);
+            leg.rotation.y = angle;
+            leg.rotation.z = 0.65; // Deployed landing stance
+            rocketGroup.add(leg);
+            legAssemblies.push(leg);
+        }
+
+        // 4. Octoweb Heat Shield Base & Swiveling Center Merlin 1D Engine
+        const octoweb = new THREE.Mesh(new THREE.CylinderGeometry(1.22, 1.25, 0.5, 32), titaniumMat);
+        octoweb.position.y = 0.25;
+        rocketGroup.add(octoweb);
+
+        // 8 Outer Engine Bells (static)
+        for (let i = 0; i < 8; i++) {
+            const angle = (i * Math.PI) / 4;
+            const bell = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 16, 1, true), titaniumMat);
+            bell.position.set(Math.cos(angle) * 0.75, 0.0, Math.sin(angle) * 0.75);
+            rocketGroup.add(bell);
+        }
+
+        // Center Gimballing Merlin 1D Engine (Thrust Vector Control)
+        const nozzleGroup = new THREE.Group();
+        nozzleGroup.position.set(0, 0.2, 0);
+
+        const centerBell = new THREE.Mesh(
+            new THREE.ConeGeometry(0.5, 1.2, 32, 1, true),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.95, roughness: 0.15 })
+        );
+        centerBell.position.y = -0.6;
+        nozzleGroup.add(centerBell);
+
+        // Supersonic Plume: Outer Fire + Inner Mach Diamonds
+        const flameOuter = new THREE.Mesh(
+            new THREE.ConeGeometry(0.75, 6.0, 24),
+            new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.88 })
+        );
+        flameOuter.position.y = -3.5;
+        flameOuter.rotation.x = Math.PI;
+        nozzleGroup.add(flameOuter);
+
+        const flameInner = new THREE.Mesh(
+            new THREE.ConeGeometry(0.32, 3.8, 16),
+            new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.95 })
+        );
+        flameInner.position.y = -2.3;
+        flameInner.rotation.x = Math.PI;
+        nozzleGroup.add(flameInner);
+
+        rocketGroup.add(nozzleGroup);
+        scene.add(rocketGroup);
+
+        // 5. RCS Cold-Gas Thruster Puffs (Nitrogen bursts for attitude spin recovery)
+        const rcsGeo = new THREE.BufferGeometry();
+        const rcsCount = 30;
+        const rcsPos = new Float32Array(rcsCount * 3);
+        const rcsData = [];
+        for (let i = 0; i < rcsCount; i++) {
+            rcsPos[i * 3] = 0; rcsPos[i * 3 + 1] = -100; rcsPos[i * 3 + 2] = 0;
+            rcsData.push({ x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, life: 1, maxLife: 0.3 });
+        }
+        rcsGeo.setAttribute('position', new THREE.BufferAttribute(rcsPos, 3));
+        const rcsParticles = new THREE.Points(rcsGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.5, transparent: true, opacity: 0.8 }));
+        scene.add(rcsParticles);
+
+        let rcsIdx = 0;
+        function spawnRCS(dir) {
+            const p = rcsData[rcsIdx];
+            p.x = rocketGroup.position.x + (dir > 0 ? 1.3 : -1.3);
+            p.y = rocketGroup.position.y + 12.0;
+            p.z = 0;
+            p.vx = dir * 18 + (Math.random() - 0.5) * 4;
+            p.vy = (Math.random() - 0.5) * 3;
+            p.vz = (Math.random() - 0.5) * 4;
+            p.life = 0;
+            rcsIdx = (rcsIdx + 1) % rcsCount;
+        }
+
+        // 6. Exhaust Smoke Particle Trail
+        const smokeCount = 120;
+        const smokeGeo = new THREE.BufferGeometry();
+        const smokePos = new Float32Array(smokeCount * 3);
+        const smokeData = [];
+        for (let i = 0; i < smokeCount; i++) {
+            smokePos[i * 3] = 0; smokePos[i * 3 + 1] = -100; smokePos[i * 3 + 2] = 0;
+            smokeData.push({ x: 0, y: -100, z: 0, vx: 0, vy: 0, vz: 0, life: 1, maxLife: 1.0 });
+        }
+        smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3));
+        const smokeParticles = new THREE.Points(smokeGeo, new THREE.PointsMaterial({ color: 0x94a3b8, size: 6.5, transparent: true, opacity: 0.45, depthWrite: false }));
+        scene.add(smokeParticles);
+
+        let smokeIdx = 0;
+        function spawnSmoke(x, y, z, vx, vy, vz) {
+            const p = smokeData[smokeIdx];
+            p.x = x + (Math.random() - 0.5) * 1.5;
+            p.y = y;
+            p.z = z + (Math.random() - 0.5) * 1.5;
+            p.vx = vx * 0.2 + (Math.random() - 0.5) * 3;
+            p.vy = vy * 0.3 - 2;
+            p.vz = vz * 0.2 + (Math.random() - 0.5) * 3;
+            p.life = 0;
+            p.maxLife = 0.8 + Math.random() * 0.5;
+            smokeIdx = (smokeIdx + 1) % smokeCount;
+        }
+
+        // --- 6. Online Adaptive Meta-Learning Engine ---
+        const aiBrain = {
+            version: 1.0,
+            anomaliesResolved: 0,
+            
+            // Adaptable Policy Parameters
+            attitudeKp: 2.8,        // Proportional restoring gain
+            attitudeKd: 2.2,        // Derivative spin damping
+            burnAltitudeGain: 8.5,  // Deceleration glide slope trigger
+            burnBrakeGain: 3.5,     // High-altitude braking authority
+            lateralCrabGain: 0.035, // Crosswind compensation gain
+            
+            lastFlightState: { tilt: 0, spin: 0 },
+
+            adaptFromFlight: function(vy, tiltDeg, padDistX, status) {
+                if (status === "CRASH") {
+                    this.anomaliesResolved++;
+                    this.version = (1.0 + this.anomaliesResolved * 0.1).toFixed(1);
+                    const adaptLvlEl = document.getElementById('adapt-level');
+                    if (adaptLvlEl) adaptLvlEl.innerText = `v${this.version}`;
+
+                    let fixes = [];
+
+                    // Diagnosis 1: Hard Impact Slam
+                    if (vy > 3.0) {
+                        this.burnAltitudeGain += 1.2;
+                        this.burnBrakeGain += 0.8;
+                        fixes.push(`Burn Advance ↑ (${this.burnAltitudeGain.toFixed(1)}m)`);
+                    }
+
+                    // Diagnosis 2: Extreme Tilt / Tumble Tip Over
+                    if (tiltDeg > 8.0) {
+                        this.attitudeKp += 0.8;
+                        this.attitudeKd += 0.6;
+                        fixes.push(`TVC Torque Gain ↑ (${this.attitudeKp.toFixed(1)}x)`);
+                    }
+
+                    // Diagnosis 3: Lateral Pad Miss
+                    if (padDistX > 20.0) {
+                        this.lateralCrabGain += 0.015;
+                        fixes.push(`Pad Drift Lock ↑ (${this.lateralCrabGain.toFixed(3)})`);
+                    }
+
+                    return {
+                        adapted: true,
+                        text: `Anomaly analyzed! Policy auto-tuned: ${fixes.join(' | ')}. Click 'Auto-Adapt & Re-Fly' to verify recovery.`
+                    };
+                } else {
+                    return {
+                        adapted: false,
+                        text: `Flawless execution! Neural policy weights confirmed optimal for this profile.`
+                    };
+                }
+            }
+        };
+
+        // --- 7. Extreme Tumble Recovery Physics Engine ---
+        const physics = {
+            dryMass: 1000.0,
+            fuelMassInitial: 500.0,
+            fuelMass: 500.0,
+            mass: 1500.0,
+            length: 14.0,
+            g: 9.81,
+            maxThrust: 30000.0,
+            minThrustRatio: 0.3,
+            maxGimbal: (15.0 * Math.PI) / 180.0,
+            isp: 300.0,
+            dt: 0.05,
+            
+            x: 0,
+            y: 330,
+            vx: 0,
+            vy: -22,
+            theta: 0,
+            omega: 0,
+            windX: 0,
+
+            throttle: 0,
+            gimbal: 0,
+            status: "DESCENT",
+            flightCount: 1,
+
+            reset: function(initialTiltDeg=0, initialSpinDeg=0) {
+                aiBrain.lastFlightState.tilt = initialTiltDeg;
+                aiBrain.lastFlightState.spin = initialSpinDeg;
+
+                this.x = (Math.random() - 0.5) * 70;
+                this.y = 290 + Math.random() * 70;
+                this.vx = (Math.random() - 0.5) * 14;
+                this.vy = -(16 + Math.random() * 14);
+                
+                // Set explicit angle and spin
+                this.theta = (initialTiltDeg * Math.PI) / 180.0;
+                this.omega = (initialSpinDeg * Math.PI) / 180.0;
+
+                this.fuelMass = this.fuelMassInitial;
+                this.mass = this.dryMass + this.fuelMass;
+                this.status = "DESCENT";
+                this.flightCount++;
+                document.getElementById('flight-counter').innerText = `Flight #${this.flightCount}`;
+            },
+
+            step: function() {
+                if (this.status === "LANDED" || this.status === "CRASH") return;
+
+                // --- AUTONOMOUS RECOVERY & GNC GUIDANCE ---
+                // 1. Extreme Spin Arrest & Attitude Hold (Aerodynamic TVC + RCS)
+                const isExtremeTilt = Math.abs(this.theta) > 0.25 || Math.abs(this.omega) > 0.15;
+                if (isExtremeTilt) {
+                    this.status = "RECOVERING";
+                } else if (this.status === "RECOVERING") {
+                    this.status = "DESCENT";
+                }
+
+                // Cold gas thrusters fire to kill spin rate
+                if (this.omega > 0.05) spawnRCS(-1);
+                if (this.omega < -0.05) spawnRCS(1);
+
+                // Target pitch angle to steer toward pad X=0 while killing wind drift
+                const targetTheta = THREE.MathUtils.clamp(
+                    (this.x * 0.015) + (this.vx * aiBrain.lateralCrabGain) - (this.windX * 0.005),
+                    -0.28, 0.28
+                );
+                const angleError = this.theta - targetTheta;
+
+                // High-gain TVC Gimbal using adapted gains
+                const rawGimbal = (angleError * aiBrain.attitudeKp + this.omega * aiBrain.attitudeKd);
+                this.gimbal = THREE.MathUtils.clamp(rawGimbal, -1.0, 1.0) * this.maxGimbal;
+
+                // 2. Dual-Gain Precision Altitude Deceleration using adapted burn gains
+                let targetVy, k_gain;
+                if (this.y < 18.0) {
+                    targetVy = -1.4;
+                    k_gain = 8.0;
+                } else {
+                    targetVy = -Math.max(2.0, Math.min(25.0, (this.y / 25.0) * aiBrain.burnAltitudeGain));
+                    k_gain = aiBrain.burnBrakeGain;
+                }
+
+                const a_needed = (targetVy - this.vy) * k_gain;
+                const f_needed = this.mass * (this.g + a_needed);
+                let th_cmd = THREE.MathUtils.clamp(f_needed / this.maxThrust, 0.0, 1.0);
+
+                // If in extreme tumble, ensure engine fires with enough torque to pull out
+                if (isExtremeTilt) {
+                    th_cmd = Math.max(0.45, th_cmd);
+                }
+
+                this.throttle = th_cmd;
+
+                if (this.fuelMass <= 0) this.throttle = 0;
+
+                // Non-linear Dynamics
+                const thrust = this.throttle > 0 ? this.throttle * this.maxThrust : 0;
+                if (thrust > 0) {
+                    const fuelBurn = (thrust / (this.isp * this.g)) * this.dt;
+                    this.fuelMass = Math.max(0, this.fuelMass - fuelBurn);
+                    this.mass = this.dryMass + this.fuelMass;
+                }
+
+                const I_zz = (1.0 / 12.0) * this.mass * Math.pow(this.length, 2);
+                const thrustAngle = this.theta + this.gimbal;
+                const F_tx = -thrust * Math.sin(thrustAngle);
+                const F_ty = thrust * Math.cos(thrustAngle);
+
+                // Crosswind drag
+                const relVx = this.vx - this.windX;
+                const F_dx = -0.5 * 1.225 * 0.8 * (Math.PI * 1.2) * relVx * Math.abs(relVx);
+                const F_dy = -0.5 * 1.225 * 0.8 * (Math.PI * 1.2) * this.vy * Math.abs(this.vy);
+
+                const ax = (F_tx + F_dx) / this.mass;
+                const ay = (F_ty + F_dy) / this.mass - this.g;
+
+                // Rotational torque (negative feedback restoring torque)
+                const torque = -thrust * Math.sin(this.gimbal) * (this.length / 2.0);
+                const alpha = torque / I_zz;
+
+                // Semi-Implicit Symplectic Euler with RCS spin damping
+                this.omega += alpha * this.dt;
+                this.omega *= 0.985;
+                this.theta += this.omega * this.dt;
+
+                this.vx += ax * this.dt;
+                this.vy += ay * this.dt;
+                this.x += this.vx * this.dt;
+                this.y += this.vy * this.dt;
+
+                // Touchdown check
+                if (this.y <= 4.0) {
+                    this.y = 4.0;
+                    const softTouch = Math.abs(this.vy) < 3.2;
+                    const upright = Math.abs(this.theta) < (9.0 * Math.PI / 180.0);
+                    const onDeck = Math.abs(this.x) < 30.0;
+
+                    const finalVy = Math.abs(this.vy);
+                    const finalTilt = Math.abs(this.theta * 180 / Math.PI);
+                    const finalDist = Math.abs(this.x);
+                    const finalFuel = Math.round((this.fuelMass / this.fuelMassInitial) * 100);
+
+                    if (softTouch && upright && onDeck) {
+                        this.status = "LANDED";
+                        if (finalVy < 1.6 && finalTilt < 2.0 && finalDist < 3.5) {
+                            showDebrief("A+ FLAWLESS", "Pristine Autonomous Falcon 9 Touchdown", finalVy, finalDist, finalTilt, finalFuel, "grade-flawless");
+                        } else if (finalVy < 2.4 && finalTilt < 4.5) {
+                            showDebrief("A EXCELLENT", "Soft Touchdown within High-Precision Limits", finalVy, finalDist, finalTilt, finalFuel, "grade-excellent");
+                        } else {
+                            showDebrief("B NOMINAL", "Touchdown Successful with Minor Drift", finalVy, finalDist, finalTilt, finalFuel, "grade-nominal");
+                        }
+                    } else {
+                        this.status = "CRASH";
+                        showDebrief("ANOMALY / CRASH", "Hard Impact Exceeded Structural Limits", finalVy, finalDist, finalTilt, finalFuel, "grade-crash");
+                    }
+                    this.throttle = 0;
+                }
+            }
+        };
+
+        physics.reset(0, 0);
+
+        // --- 7. UI Controls & Presets ---
+        const valAlt = document.getElementById('val-alt');
+        const valVy = document.getElementById('val-vy');
+        const valVx = document.getElementById('val-vx');
+        const valTilt = document.getElementById('val-tilt');
+        const valOmega = document.getElementById('val-omega');
+        const valGimbal = document.getElementById('val-gimbal');
+        const valThrottle = document.getElementById('val-throttle');
+        const valFuel = document.getElementById('val-fuel');
+        const barAlt = document.getElementById('bar-alt');
+        const barFuel = document.getElementById('bar-fuel');
+        const gyroLine = document.getElementById('gyro-line');
+        const statusPill = document.getElementById('status-pill');
+
+        const tiltSlider = document.getElementById('slider-tilt');
+        const tiltLabel = document.getElementById('tilt-label');
+        const spinSlider = document.getElementById('slider-spin');
+        const spinLabel = document.getElementById('spin-label');
+        const windSlider = document.getElementById('slider-wind');
+        const windLabel = document.getElementById('wind-label');
+
+        function formatTiltLabel(v) {
+            const val = parseFloat(v);
+            if (val < 0) return `${Math.abs(val)}° Left`;
+            if (val > 0) return `${Math.abs(val)}° Right`;
+            return `0° (Vertical)`;
+        }
+
+        function formatSpinLabel(v) {
+            const val = parseFloat(v);
+            if (val < 0) return `${Math.abs(val)}°/s CCW`;
+            if (val > 0) return `${Math.abs(val)}°/s CW`;
+            return `0.0°/s`;
+        }
+
+        function formatWindLabel(v) {
+            const kmh = parseFloat(v);
+            if (kmh < 0) return `${Math.abs(kmh)} km/h (West ←)`;
+            if (kmh > 0) return `${Math.abs(kmh)} km/h (East →)`;
+            return `Calm (0 km/h)`;
+        }
+
+        tiltSlider.addEventListener('input', (e) => {
+            tiltLabel.innerText = formatTiltLabel(e.target.value);
+        });
+        spinSlider.addEventListener('input', (e) => {
+            spinLabel.innerText = formatSpinLabel(e.target.value);
+        });
+        windSlider.addEventListener('input', (e) => {
+            const kmh = parseFloat(e.target.value);
+            physics.windX = kmh / 3.6;
+            windLabel.innerText = formatWindLabel(kmh);
+        });
+
+        // Debrief HUD Binding
+        const debriefHud = document.getElementById('debrief-hud');
+        const debriefGrade = document.getElementById('debrief-grade');
+        const debriefSub = document.getElementById('debrief-sub');
+        const dbVy = document.getElementById('db-vy');
+        const dbDist = document.getElementById('db-dist');
+        const dbTilt = document.getElementById('db-tilt');
+        const dbFuel = document.getElementById('db-fuel');
+        const dbAdaptText = document.getElementById('db-adapt-text');
+
+        function showDebrief(grade, sub, vy, dist, tilt, fuel, gradeClass) {
+            debriefHud.className = `hud-panel active ${gradeClass}`;
+            debriefGrade.innerText = grade;
+            debriefSub.innerText = sub;
+            dbVy.innerText = `${vy.toFixed(2)} m/s`;
+            dbVy.className = `debrief-val ${vy < 1.6 ? 'safe' : vy < 2.5 ? 'warn' : 'danger'}`;
+            dbDist.innerText = `${dist.toFixed(2)} m`;
+            dbDist.className = `debrief-val ${dist < 3.5 ? 'safe' : dist < 8.0 ? 'warn' : 'danger'}`;
+            dbTilt.innerText = `${tilt.toFixed(1)}°`;
+            dbTilt.className = `debrief-val ${tilt < 2.0 ? 'safe' : tilt < 5.0 ? 'warn' : 'danger'}`;
+            dbFuel.innerText = `${fuel}%`;
+
+            const adaptRes = aiBrain.adaptFromFlight(vy, tilt, dist, physics.status);
+            if (dbAdaptText) dbAdaptText.innerText = adaptRes.text;
+        }
+
+        function hideDebrief() {
+            debriefHud.classList.remove('active');
+        }
+
+        document.getElementById('debrief-close').addEventListener('click', hideDebrief);
+        document.getElementById('db-relaunch').addEventListener('click', () => {
+            hideDebrief();
+            triggerFlight(parseFloat(tiltSlider.value), parseFloat(spinSlider.value));
+        });
+
+        document.getElementById('db-auto-adapt').addEventListener('click', () => {
+            hideDebrief();
+            triggerFlight(aiBrain.lastFlightState.tilt, aiBrain.lastFlightState.spin);
+        });
+
+        function triggerFlight(tilt, spin) {
+            hideDebrief();
+            tiltSlider.value = tilt;
+            tiltLabel.innerText = formatTiltLabel(tilt);
+            spinSlider.value = spin;
+            spinLabel.innerText = formatSpinLabel(spin);
+            physics.reset(tilt, spin);
+        }
+
+        document.getElementById('btn-launch').addEventListener('click', () => {
+            triggerFlight(parseFloat(tiltSlider.value), parseFloat(spinSlider.value));
+        });
+
+        document.getElementById('btn-zero').addEventListener('click', () => {
+            triggerFlight(0, 0);
+        });
+
+        // Camera Modes
+        let camMode = "follow";
+        const camFollow = document.getElementById('cam-follow');
+        const camDeck = document.getElementById('cam-deck');
+        const camOrbit = document.getElementById('cam-orbit');
+
+        function setCam(m) {
+            camMode = m;
+            [camFollow, camDeck, camOrbit].forEach(b => b.classList.remove('active'));
+            if (m === 'follow') camFollow.classList.add('active');
+            if (m === 'deck') camDeck.classList.add('active');
+            if (m === 'orbit') camOrbit.classList.add('active');
+        }
+        camFollow.addEventListener('click', () => setCam('follow'));
+        camDeck.addEventListener('click', () => setCam('deck'));
+        camOrbit.addEventListener('click', () => setCam('orbit'));
+
+        // --- 8. Render Animation Loop ---
+        let clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // Run Physics
+            physics.step();
+
+            // Sync 3D Rocket
+            rocketGroup.position.set(physics.x, physics.y, 0);
+            rocketGroup.rotation.z = -physics.theta;
+
+            // Swivel Engine Bell
+            nozzleGroup.rotation.z = -physics.gimbal;
+
+            // Grid fins tilt dynamically with angular velocity
+            for (let fin of gridFins) {
+                fin.rotation.z = physics.omega * 1.5;
+            }
+
+            // Engine Flame & Dynamic Light
+            if (physics.throttle > 0 && physics.fuelMass > 0) {
+                flameOuter.visible = true;
+                flameInner.visible = true;
+                const flicker = 0.85 + Math.random() * 0.3;
+                const scaleY = physics.throttle * flicker;
+                flameOuter.scale.set(flicker, scaleY, flicker);
+                flameInner.scale.set(flicker, scaleY * 1.1, flicker);
+
+                engineLight.position.set(physics.x, physics.y - 2, 0);
+                engineLight.intensity = physics.throttle * 4.8 * flicker;
+
+                spawnSmoke(physics.x, physics.y - 3, 0, physics.vx, physics.vy, 0);
+
+                if (soundEnabled && noiseGain && noiseFilter) {
+                    noiseGain.gain.setTargetAtTime(physics.throttle * 0.5, audioCtx.currentTime, 0.05);
+                    noiseFilter.frequency.setTargetAtTime(140 + physics.throttle * 420, audioCtx.currentTime, 0.05);
+                }
+            } else {
+                flameOuter.visible = false;
+                flameInner.visible = false;
+                engineLight.intensity = 0;
+                if (soundEnabled && noiseGain) {
+                    noiseGain.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.1);
+                }
+            }
+
+            // Update Smoke
+            const sPos = smokeGeo.attributes.position;
+            for (let i = 0; i < smokeCount; i++) {
+                const p = smokeData[i];
+                if (p.life < p.maxLife) {
+                    p.life += delta;
+                    p.x += p.vx * delta;
+                    p.y += p.vy * delta;
+                    p.z += p.vz * delta;
+                    sPos.setXYZ(i, p.x, p.y, p.z);
+                } else {
+                    sPos.setXYZ(i, 0, -100, 0);
+                }
+            }
+            sPos.needsUpdate = true;
+
+            // Update RCS Puffs
+            const rPos = rcsGeo.attributes.position;
+            for (let i = 0; i < rcsCount; i++) {
+                const p = rcsData[i];
+                if (p.life < p.maxLife) {
+                    p.life += delta;
+                    p.x += p.vx * delta;
+                    p.y += p.vy * delta;
+                    p.z += p.vz * delta;
+                    rPos.setXYZ(i, p.x, p.y, p.z);
+                } else {
+                    rPos.setXYZ(i, 0, -100, 0);
+                }
+            }
+            rPos.needsUpdate = true;
+
+            // Camera Views
+            if (camMode === 'follow') {
+                camera.position.lerp(new THREE.Vector3(physics.x, Math.max(18, physics.y + 12), 95), 0.08);
+                controls.target.lerp(new THREE.Vector3(physics.x, Math.max(10, physics.y), 0), 0.1);
+            } else if (camMode === 'deck') {
+                camera.position.lerp(new THREE.Vector3(28, 6, 42), 0.05);
+                controls.target.lerp(new THREE.Vector3(physics.x, physics.y, 0), 0.1);
+            } else {
+                controls.target.lerp(new THREE.Vector3(physics.x, Math.max(10, physics.y), 0), 0.05);
+            }
+            controls.update();
+
+            // Refresh HUD
+            valAlt.innerText = `${physics.y.toFixed(1)} m`;
+            barAlt.style.width = `${Math.min(100, (physics.y / 350.0) * 100)}%`;
+
+            valVy.innerText = `${physics.vy.toFixed(1)} m/s`;
+            valVy.className = `telem-val ${Math.abs(physics.vy) > 8 && physics.y < 50 ? 'danger' : Math.abs(physics.vy) > 3.2 ? 'warn' : 'safe'}`;
+
+            const degTilt = physics.theta * 180 / Math.PI;
+            const degOmega = physics.omega * 180 / Math.PI;
+            const degGimbal = physics.gimbal * 180 / Math.PI;
+
+            valVx.innerText = `${Math.abs(physics.vx).toFixed(1)} m/s ${physics.vx < -0.1 ? '← West' : physics.vx > 0.1 ? '→ East' : ''}`;
+            valTilt.innerText = `${Math.abs(degTilt).toFixed(1)}° ${degTilt < -0.1 ? 'Left' : degTilt > 0.1 ? 'Right' : ''}`;
+            valOmega.innerText = `${Math.abs(degOmega).toFixed(1)}°/s ${degOmega < -0.1 ? 'CCW' : degOmega > 0.1 ? 'CW' : ''}`;
+            valGimbal.innerText = `${Math.abs(degGimbal).toFixed(1)}° ${degGimbal < -0.1 ? 'Gimbal Left' : degGimbal > 0.1 ? 'Gimbal Right' : 'Center'}`;
+            valThrottle.innerText = `${Math.round(physics.throttle * 100)}%`;
+
+            const fuelPct = Math.round((physics.fuelMass / physics.fuelMassInitial) * 100);
+            valFuel.innerText = `${fuelPct}%`;
+            barFuel.style.width = `${fuelPct}%`;
+
+            gyroLine.style.transform = `rotate(${physics.theta * 180 / Math.PI}deg)`;
+
+            if (physics.status === "LANDED") {
+                statusPill.className = "status-pill status-landed";
+                statusPill.innerText = "TOUCHDOWN CONFIRMED (PAD CENTER)";
+            } else if (physics.status === "CRASH") {
+                statusPill.className = "status-pill status-crash";
+                statusPill.innerText = "CRASH / ANOMALY DETECTED";
+            } else if (physics.status === "RECOVERING") {
+                statusPill.className = "status-pill status-recover";
+                statusPill.innerText = "ATTITUDE SPIN RECOVERY IN PROGRESS";
+            } else if (physics.throttle > 0.5) {
+                statusPill.className = "status-pill status-burn";
+                statusPill.innerText = "SUICIDE BURN IN PROGRESS";
+            } else {
+                statusPill.className = "status-pill status-descent";
+                statusPill.innerText = "FREEFALL BALLISTIC DESCENT";
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
